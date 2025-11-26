@@ -21,6 +21,12 @@ subnets = {
     address_prefixes    = ["10.0.1.0/24"]
     vnet                = "test_dev_vnet"
   }
+  "sub2" = {
+    name                = "AzureBastionSubnet"
+    resource_group_name = "test_dev-rg"
+    address_prefixes    = ["10.0.1.0/26"]
+    vnet                = "test_dev_vnet"
+  }
 }
 
 stgs = {
@@ -99,12 +105,26 @@ clusters = {
     location            = "centralindia"
     resource_group_name = "test_dev-rg"
     dns_prefix          = "testakc"
+
+    default_node_pool = {
+      pool1 = {
+        name       = "default"
+        node_count = 1
+        vm_size    = "Standard_D2_v2"
+      }
+    }
   }
 }
 
 pips = {
   "pip1" = {
     name                = "publicip1"
+    location            = "centralindia"
+    resource_group_name = "test_dev-rg"
+    allocation_method   = "Static"
+  }
+  "pip2" = {
+    name                = "publicip2"
     location            = "centralindia"
     resource_group_name = "test_dev-rg"
     allocation_method   = "Static"
@@ -124,6 +144,19 @@ vms = {
       ip1 = {
         name                          = "internal"
         private_ip_address_allocation = "Dynamic"
+      }
+    }
+  }
+}
+
+bastions = {
+  "bastion1" = {
+    name                = "bastion"
+    location            = "centralindia"
+    resource_group_name = "test_dev-rg"
+    ip_configuration = {
+      config = {
+        name = "configuration"
       }
     }
   }

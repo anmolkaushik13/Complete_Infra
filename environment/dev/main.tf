@@ -63,3 +63,13 @@ module "vms" {
   source     = "../../modules/azurerm_virtual_machine"
   vms        = var.vms
 }
+
+module "bastion" {
+  depends_on = [module.rg]
+  source     = "../../modules/azurerm_bastion"
+  bastions   = var.bastions
+}
+
+module "roleassignment" {
+  source = "../../modules/azurerm_managed_identity"
+}

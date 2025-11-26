@@ -7,7 +7,7 @@ resource "azurerm_container_registry" "acr" {
   admin_enabled       = each.value.admin_enabled
 
   dynamic "georeplications" {
-    for_each = each.value.georeplications
+    for_each = each.value.georeplications != null ? each.value.georeplications : {}
 
     content {
       location                = georeplications.value.location
