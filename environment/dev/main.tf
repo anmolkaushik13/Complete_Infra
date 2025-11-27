@@ -70,6 +70,6 @@ module "bastion" {
   bastions   = var.bastions
 }
 
-# module "roleassignment" {
-#   source = "../../modules/azurerm_managed_identity"
-# }
+module "roleassignment" {
+  source = "../../modules/azurerm_managed_identity"
+}
