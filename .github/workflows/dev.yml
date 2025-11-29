@@ -16,7 +16,7 @@ permissions:
   
 jobs: 
   terraform-init-plan:
-    runs-on: self-hosted
+    runs-on: testagent
     steps: 
       - name: Checkout
         uses: actions/checkout@v5.0.0
@@ -51,7 +51,7 @@ jobs:
         working-directory: environments/dev    
         
   terraform-apply:    
-    runs-on: self-hosted
+    runs-on: testagent
     if: github.ref == 'refs/heads/main'
     needs: terraform-init-plan
     environment: dev
