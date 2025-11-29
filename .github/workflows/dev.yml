@@ -32,23 +32,23 @@ jobs:
         id: fmt
         run: terraform fmt -check
         continue-on-error: true
-        working-directory: environments/dev
+        working-directory: environment/dev
         
       - name: Terraform Init
         id: init
         run: terraform init -input=false  
-        working-directory: environments/dev
+        working-directory: environment/dev
 
       - name: Terraform Validate
         id: validate
         run: terraform validate -no-color
-        working-directory: environments/dev        
+        working-directory: environment/dev        
       
       - name: Terraform Plan
         id: plan
         run: terraform plan -no-color -input=false
         continue-on-error: true
-        working-directory: environments/dev    
+        working-directory: environment/dev    
         
   terraform-apply:    
     runs-on: testagent
@@ -69,11 +69,11 @@ jobs:
       - name: Terraform Init
         id: init
         run: terraform init -input=false  
-        working-directory: environments/dev
+        working-directory: environment/dev
 
       - name: Terraform Apply
         id: apply
         run: terraform apply --auto-approve
         continue-on-error: true
-        working-directory: environments/dev        
+        working-directory: environment/dev        
 
