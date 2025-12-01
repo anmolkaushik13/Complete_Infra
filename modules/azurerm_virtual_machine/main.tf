@@ -9,9 +9,12 @@ resource "azurerm_network_interface" "nic" {
     for_each = each.value.ip_configuration != null ? each.value.ip_configuration : {}
 
     content {
-      name                          = ip_configuration.value.name
-      subnet_id                     = data.azurerm_subnet.datasubnet.id
-      public_ip_address_id          = data.azurerm_public_ip.datapublic.id
+      name                 = ip_configuration.value.name
+      subnet_id            = module.subnet.subnet_ids["sub1"]
+      public_ip_address_id = module.publicip.pip_ids["pip1"]
+
+      # subnet_id                     = data.azurerm_subnet.datasubnet.id
+      # public_ip_address_id          = data.azurerm_public_ip.datapublic.id
       private_ip_address_allocation = ip_configuration.value.private_ip_address_allocation
     }
   }
@@ -25,6 +28,7 @@ resource "azurerm_linux_virtual_machine" "vm" {
   size                  = each.value.size
   network_interface_ids = [azurerm_network_interface.nic[each.key].id]
   admin_username        = each.value.admin_username
+  admin_password        = "StrongPassword123!"
   os_disk {
     caching              = "ReadWrite"
     storage_account_type = "Standard_LRS"
