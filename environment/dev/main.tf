@@ -62,6 +62,8 @@ module "vms" {
   depends_on = [module.rg, module.vnet]
   source     = "../../modules/azurerm_virtual_machine"
   vms        = var.vms
+  subnet_ids = module.subnet.subnet_ids
+  pip_ids    = module.publicip.pip_ids
 }
 
 module "bastion" {
