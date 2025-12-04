@@ -10,8 +10,8 @@ resource "azurerm_network_interface" "nic" {
 
     content {
       name                 = ip_configuration.value.name
-      subnet_id            = module.subnet.subnet_ids["sub1"]
-      public_ip_address_id = module.publicip.pip_ids["pip1"]
+      subnet_id            = var.subnet_ids["sub1"]
+      public_ip_address_id = var.pip_ids["pip1"]
 
       # subnet_id                     = data.azurerm_subnet.datasubnet.id
       # public_ip_address_id          = data.azurerm_public_ip.datapublic.id

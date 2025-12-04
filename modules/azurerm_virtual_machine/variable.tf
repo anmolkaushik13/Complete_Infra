@@ -13,3 +13,11 @@ variable "vms" {
     }))
   }))
 }
+
+variable "subnet_ids" {
+  type = map(string)
+}
+
+variable "pip_ids" {
+  type = map(string)
+}
