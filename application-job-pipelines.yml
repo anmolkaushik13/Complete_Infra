@@ -1,0 +1,208 @@
+trigger: none
+# trigger:
+#   branches:
+#     include:
+#       - main
+pool: infra_pool
+
+name: infra-jobs-pipeline
+
+variables:
+- name: workdir
+  value: $(System.DefaultWorkingDirectory)/environment/dev
+- group: INFRACOST_API_KEY
+
+jobs:
+
+  # ----------------------------------------
+  # MAIN TERRAFORM JOB (init + validate + fmt)
+  # ----------------------------------------
+  - job: Terraform_init_validate_fmt
+    displayName: 'Terraform: Init, Validate & Format'
+    steps:
+
+      - task: TerraformTask@5
+        displayName: 'Terraform: Init'
+        inputs:
+          provider: 'azurerm'
+          command: 'init'
+          workingDirectory: '$(workdir)'
+          backendServiceArm: 'infra_pipeline'
+          backendAzureRmStorageAccountName: 'pipelinestd1'
+          backendAzureRmContainerName: 'tfstate'
+          backendAzureRmKey: 'terraform.tfstate'
+
+      - task: TerraformTask@5
+        displayName: 'Terraform: Validate'
+        inputs:
+          provider: 'azurerm'
+          command: 'validate'
+          workingDirectory: '$(workdir)'
+
+      - task: TerraformTask@5
+        displayName: 'Terraform: Format'
+        inputs:
+          provider: 'azurerm'
+          command: 'custom'
+          workingDirectory: '$(workdir)'
+          customCommand: 'fmt'
+          environmentServiceNameAzureRM: 'infra_pipeline'
+
+  # ----------------------------------------
+  # SECURITY SCANS
+  # ----------------------------------------
+  - job: tfsec
+    displayName: 'Security: Terraform Scans'
+    dependsOn: Terraform_init_validate_fmt
+    pool: infra_pool
+    steps:
+      - task: tfsec@1
+        displayName: 'Security Scan: tfsec'
+        inputs:
+          version: 'v1.26.0'
+          dir: '$(workdir)'
+                
+      - task: PowerShell@2
+        displayName: 'Security Scan: Checkov'
+        inputs:
+          targetType: 'inline'
+          script: |
+            python -m pip install --upgrade pip
+            pip install checkov
+            checkov --version
+
+            checkov -d . --quiet
+            Write-Host "Checkov scan completed"
+        continueOnError: true
+
+      - task: PowerShell@2
+        displayName: 'Security Scan: TruffleHog'
+        inputs:
+          targetType: 'inline'
+          script: |
+            pip install --upgrade trufflehog
+            trufflehog --version
+
+            trufflehog filesystem . --no-update
+            if ($LASTEXITCODE -ne 0) {
+                Write-Host "TruffleHog detected potential secrets"
+                exit 0
+            }
+
+      - task: PowerShell@2
+        displayName: 'Security Scan: Download Terrascan'
+        inputs:
+          targetType: 'inline'
+          script: |
+            $version = "1.18.0"
+            $url = "https://github.com/tenable/terrascan/releases/download/v$version/terrascan_${version}_Windows_x86_64.tar.gz"
+            $archive = "$(Agent.TempDirectory)\terrascan.tar.gz"
+            $extract = "$(Agent.TempDirectory)\terrascan"
+
+            Invoke-WebRequest -Uri $url -OutFile $archive
+            tar -xzf $archive -C "$(Agent.TempDirectory)"
+            $env:PATH += ";$(Agent.TempDirectory)"
+            terrascan version
+
+      - task: PowerShell@2
+        displayName: 'Security Scan: Terrascan'
+        inputs:
+          targetType: 'inline'
+          script: |
+            $env:PATH += ";$(Agent.TempDirectory)"
+            terrascan scan -t azure -i terraform -d .
+            if ($LASTEXITCODE -ne 0) {
+                Write-Host "Terrascan detected policy violations"
+                exit 0
+            }
+
+  # ----------------------------------------
+  # INFRA COST
+  # ----------------------------------------
+
+  - job: infra_job
+    displayName: Infra_job
+    steps:
+        - task: TerraformTask@5
+          displayName: 'Terraform: Init'
+          inputs:
+            provider: 'azurerm'
+            command: 'init'
+            workingDirectory: '$(workdir)'
+            backendServiceArm: 'infra_pipeline'
+            backendAzureRmStorageAccountName: 'pipelinestd1'
+            backendAzureRmContainerName: 'tfstate'
+            backendAzureRmKey: 'terraform.tfstate'
+        
+        - task: TerraformTaskV4@4
+          displayName: Terraform Plan
+          inputs:
+            provider: 'azurerm'
+            command: 'plan'
+            workingDirectory: '$(workdir)'
+            commandOptions: '-out=tfplan'
+            environmentServiceNameAzureRM: 'infra_pipeline'
+
+            
+        - powershell: |
+              $env:INFRACOST_API_KEY = "$(INFRACOST_API_KEY)"
+              infracost breakdown --path "tfplan" --format table --out-file infracost.txt
+          displayName: "Generate Cost Report"
+          workingDirectory: '$(workdir)'
+
+        - powershell: |
+              $source = "$(workdir)/infracost.txt"
+              $destination = "$(Build.ArtifactStagingDirectory)/infracost.txt"
+              New-Item -ItemType Directory -Force -Path "$(Build.ArtifactStagingDirectory)"
+              Copy-Item $source $destination -Force
+          displayName: "Move Infracost Report to Artifact Staging Directory"
+
+        - task: PublishBuildArtifacts@1
+          displayName: "Publish Cost Report"
+          inputs:
+            PathtoPublish: '$(Build.ArtifactStagingDirectory)/infracost.txt'
+            ArtifactName: 'CostReport'
+            publishLocation: 'Container'
+  # ----------------------------------------
+  # MANUAL APPROVAL
+  # ----------------------------------------
+  - job: Manualvalidation
+    displayName: 'Manual Approval'
+    dependsOn:
+      - Terraform_init_validate_fmt
+      - tfsec
+    pool: server
+    steps:
+      - task: ManualValidation@1
+        inputs:
+          notifyUsers: 'anmolkaushik13042000@gmail.com'
+          approvers: 'anmolkaushik13042000@gmail.com'
+          instructions: 'Please approve the changes'
+
+  # ----------------------------------------
+  # TERRAFORM PLAN
+  # ----------------------------------------
+  - job: TerraformPlan
+    displayName: 'Terraform: Final Plan'
+    dependsOn: Manualvalidation
+    pool: infra_pool
+    steps:
+      - task: TerraformTask@5
+        displayName: 'Terraform: Init'
+        inputs:
+          provider: 'azurerm'
+          command: 'init'
+          workingDirectory: '$(workdir)'
+          backendServiceArm: 'infra_pipeline'
+          backendAzureRmStorageAccountName: 'pipelinestd1'
+          backendAzureRmContainerName: 'tfstate'
+          backendAzureRmKey: 'terraform.tfstate'
+
+      - task: TerraformTask@5
+        displayName: 'Terraform: Plan'
+        inputs:
+          provider: 'azurerm'
+          command: 'plan'
+          workingDirectory: '$(workdir)'
+          environmentServiceNameAzureRM: 'infra_pipeline'
+      
