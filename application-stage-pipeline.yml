@@ -1,280 +1,171 @@
-trigger: none
 # trigger:
-#   branches:
-#     include:
-#       - main
-pool: infra_pool
+# - main
 
-name: infra-jobs-pipeline
+# pool: infracost
 
-# --------------------------
-# Parameters for environment
-# --------------------------
-parameters:
-  - name: environment
-    type: string
-    default: dev
-    values:
-      - dev
-      - prod
-  - name: backendService
-    type: string
-    default: infra_pipeline
-  - name: storageAccount
-    type: string
-    default: pipelinestd1
-  - name: containerName
-    type: string
-    default: tfstate
-  - name: tfStateKey
-    type: string
-    default: terraform.tfstate
+# stages:
+#   - stage: LintStage
+#     jobs:
+#       - job: Lint
+#         displayName: Lint All
+#         steps:
+#           # 1️⃣ Checkout repo
+#           - checkout: self
 
-# --------------------------
-# Global Variables
-# --------------------------
-variables:
-- group: INFRACOST_API_KEY
-- name: workingDirectory
-  value: '$(System.DefaultWorkingDirectory)/environment/${{ parameters.environment }}'
+#           # 2️⃣ Lint JavaScript (Biome)
+#           - task: PowerShell@2
+#             continueOnError: true
+#             displayName: Lint JavaScript (Biome)
+#             inputs:
+#               targetType: 'inline'
+#               script: |
+#                 Invoke-WebRequest -Uri "https://github.com/biomejs/biome/releases/download/v0.0.0/biome-x86_64.exe" -OutFile "$(Agent.ToolsDirectory)\biome.exe"
+#                 & "$(Agent.ToolsDirectory)\biome.exe" lint "$(System.DefaultWorkingDirectory)/src"
+
+#           # 3️⃣ Lint CSS (Stylelint)
+#           - task: PowerShell@2
+#             continueOnError: true
+#             displayName: Lint CSS (Stylelint)
+#             inputs:
+#               targetType: 'inline'
+#               script: |
+#                 npm install -g stylelint
+#                 npm install -g stylelint-config-standard
+#                 npx stylelint "$(System.DefaultWorkingDirectory)/src/**/*.css" --config stylelint.config.cjs
+
+#           # 4️⃣ Lint YAML (yamllint)
+#           - task: PowerShell@2
+#             continueOnError: true
+#             displayName: Lint YAML (yamllint)
+#             inputs:
+#               targetType: 'inline'
+#               script: |
+#                 python -m ensurepip
+#                 python -m pip install --upgrade pip
+#                 python -m pip install yamllint
+#                 yamllint "$(System.DefaultWorkingDirectory)"
+
+#           # 5️⃣ Lint Markdown (markdownlint)
+#           - task: PowerShell@2
+#             continueOnError: true
+#             displayName: Lint Markdown (markdownlint)
+#             inputs:
+#               targetType: 'inline'
+#               script: |
+#                 npm install -g markdownlint-cli
+#                 markdownlint "$(System.DefaultWorkingDirectory)"
+
+
+trigger: none
+
+pool: application_pool
+
+name: ToDoInfra_Pipeline
 
 stages:
+  - stage: ScanningStage
+    displayName: 'Scanning: SonarQube Scanning'
+    jobs:
+      - job: ScanningJob
+        displayName: 'Scanning Job'
+        steps:
+          - task: SonarQubePrepare@8
+            inputs:
+              SonarQube: 'pipeline'
+              scannerMode: 'cli'
+              configMode: 'manual'
+              cliProjectKey: 'pipeline_project'
+              cliProjectName: 'pipeline_project'
+              cliSources: '.'
+          - task: SonarQubeAnalyze@8
+            inputs:
+              jdkversion: 'JAVA_HOME_17_X64'
 
-# --------------------------
-# Stage 1: Terraform Init / Validate / Fmt
-# --------------------------
-- stage: TerraformInitValidateFmt
-  displayName: 'Stage: Terraform: Init | Validate | Format'
-  jobs:
-    - job: TerraformInitValidateFmt
-      displayName: 'Terraform Quality Checks'
-      steps:
-        - task: TerraformTask@5
-          displayName: 'Terraform: Init'
-          inputs:
-            provider: 'azurerm'
-            command: 'init'
-            workingDirectory: '$(workingDirectory)'
-            backendServiceArm: '${{ parameters.backendService }}'
-            backendAzureRmStorageAccountName: '${{ parameters.storageAccount }}'
-            backendAzureRmContainerName: '${{ parameters.containerName }}'
-            backendAzureRmKey: '${{ parameters.tfStateKey }}'
+          - task: SonarQubePublish@8
+            inputs:
+              pollingTimeoutSec: '300'
 
-        - task: TerraformTask@5
-          displayName: 'Terraform: Validate'
-          inputs:
-            provider: 'azurerm'
-            command: 'validate'
-            workingDirectory: '$(workingDirectory)'
+  - stage: Linting
+    displayName: 'Linting Stage'
+    jobs:
+      - job: Lintingjob
+        steps:
+          - task: NodeTool@0
+            displayName: 'Node install'
+            inputs:
+              versionSource: 'spec'
+              versionSpec: '6.x'
 
-        - task: TerraformTask@5
-          displayName: 'Terraform: Format'
-          inputs:
-            provider: 'azurerm'
-            command: 'custom'
-            workingDirectory: '$(workingDirectory)'
-            customCommand: 'fmt'
-            environmentServiceNameAzureRM: '${{ parameters.backendService }}'
-        - task: PublishPipelineArtifact@1
-          displayName: 'Publish tfstate artifact'
-          inputs:
-            targetPath: '$(workingDirectory)'
-            artifact: 'terraform-state'
+          - task: UsePythonVersion@0
+            displayName: 'Python install'
+            inputs:
+              versionSpec: '3.x'
+              addToPath: true
+              architecture: 'x64'
 
-# --------------------------
-# Stage 2: Security Scans
-# --------------------------
-- stage: SecurityScans
-  displayName: 'Stage: Security IaC Scanning'
-  dependsOn: TerraformInitValidateFmt
-  jobs:
-    - job: TerraformSecurity
-      displayName: 'Terraform Security Scans'
-      steps:
-        - task: tfsec@1
-          displayName: 'Security Scan: tfsec'
-          inputs:
-            version: 'v1.26.0'
-            dir: '$(workingDirectory)'
+          - task: PowerShell@2
+            displayName: 'Run Yamllint'
+            continueOnError: true
+            inputs:
+              targetType: 'inline'
+              script: |
+                pip install yamllint
+                yamllint .
 
-        - task: PowerShell@2
-          displayName: 'Security Scan: Checkov'
-          inputs:
-            targetType: 'inline'
-            script: |
-              python -m pip install --upgrade pip
-              pip install checkov
-              checkov --version
-              checkov -d . --quiet
-              Write-Host "Checkov scan completed"
-          continueOnError: true
+          - task: PowerShell@2
+            displayName: 'Run MarkDownLint'
+            continueOnError: true
+            inputs:
+              targetType: 'inline'
+              script: |
+                npm install -g markdownlint-cli
+                markdownlint "**/*.md"
 
-        - task: PowerShell@2
-          displayName: 'Security Scan: TruffleHog'
-          inputs:
-            targetType: 'inline'
-            script: |
-              pip install --upgrade trufflehog
-              trufflehog --version
-              trufflehog filesystem . --no-update
-              if ($LASTEXITCODE -ne 0) {
-                  Write-Host "TruffleHog detected potential secrets"
-                  exit 0
-              }
+          - task: PowerShell@2
+            continueOnError: true
+            inputs:
+              targetType: 'inline'
+              script: |
+                npm install -g @biomejs/biome
+                biome lint .
 
-        - task: PowerShell@2
-          displayName: 'Security Scan: Download Terrascan'
-          inputs:
-            targetType: 'inline'
-            script: |
-              $version = "1.18.0"
-              $url = "https://github.com/tenable/terrascan/releases/download/v$version/terrascan_${version}_Windows_x86_64.tar.gz"
-              $archive = "$(Agent.TempDirectory)\terrascan.tar.gz"
-              $extract = "$(Agent.TempDirectory)\terrascan"
+  - stage: Build
+    displayName: 'Application Build'
+    dependsOn: Linting
+    jobs:
+      - job: BuildJob
+        steps:
+          - task: PowerShell@2
+            inputs:
+              targetType: 'inline'
+              script: 'npm install'
+          
+          - task: PowerShell@2
+            inputs:
+              targetType: 'inline'
+              script: 'npm run build'
 
-              Invoke-WebRequest -Uri $url -OutFile $archive
-              tar -xzf $archive -C "$(Agent.TempDirectory)"
-              $env:PATH += ";$(Agent.TempDirectory)"
-              terrascan version
+  - stage: PublishStage
+    displayName: 'Application Publish'
+    dependsOn: Build
+    jobs:
+      - job: Publishjob
+        steps:
+          - task: PublishPipelineArtifact@1
+            inputs:
+              targetPath: '$(System.DefaultWorkingDirectory)'
+              artifact: 'application_artifact'
+              publishLocation: 'pipeline'
 
-        - task: PowerShell@2
-          displayName: 'Security Scan: Terrascan'
-          inputs:
-            targetType: 'inline'
-            script: |
-              $env:PATH += ";$(Agent.TempDirectory)"
-              terrascan scan -t azure -i terraform -d .
-              if ($LASTEXITCODE -ne 0) {
-                  Write-Host "Terrascan detected policy violations"
-                  exit 0
-              }
-
-
-# --------------------------
-# Stage 3: Infra Cost
-# --------------------------
-- stage: InfraCost
-  displayName: 'Stage: Terraform Infra Cost'
-  dependsOn: TerraformInitValidateFmt
-  jobs:
-    - job: InfraCost
-      displayName: 'Terraform Cost Estimation'
-      steps:
-        - task: DownloadPipelineArtifact@2
-          displayName: 'Download tfstate artifact'
-          inputs:
-            artifact: 'terraform-state'
-            targetPath: '$(workingDirectory)'
-        
-        - task: TerraformTaskV4@4
-          displayName: Terraform Plan
-          inputs:
-            provider: 'azurerm'
-            command: 'plan'
-            workingDirectory: '$(workingDirectory)'
-            commandOptions: '-out=tfplan'
-            environmentServiceNameAzureRM: 'infra_pipeline'
-
-            
-        - powershell: |
-              $env:INFRACOST_API_KEY = "$(INFRACOST_API_KEY)"
-              infracost breakdown --path "tfplan" --format table --out-file infracost.txt
-          displayName: "Generate Cost Report"
-          workingDirectory: '$(workingDirectory)'
-
-        - powershell: |
-              $source = "$(workingDirectory)/infracost.txt"
-              $destination = "$(Build.ArtifactStagingDirectory)/infracost.txt"
-              New-Item -ItemType Directory -Force -Path "$(Build.ArtifactStagingDirectory)"
-              Copy-Item $source $destination -Force
-          displayName: "Move Infracost Report to Artifact Staging Directory"
-
-        - task: PublishBuildArtifacts@1
-          displayName: "Publish Cost Report"
-          inputs:
-            PathtoPublish: '$(Build.ArtifactStagingDirectory)/infracost.txt'
-            ArtifactName: 'CostReport'
-            publishLocation: 'Container'
-
-
-# --------------------------
-# Stage 4: Terraform Plan
-# --------------------------
-- stage: TerraformPlan
-  displayName: 'Stage: Terraform Final Plan'
-  dependsOn: TerraformInitValidateFmt
-  jobs:
-    - job: TerraformPlan
-      displayName: 'Terraform: Final Plan'
-      pool: infra_pool
-      steps:
-        - task: DownloadPipelineArtifact@2
-          displayName: 'Download tfstate artifact'
-          inputs:
-            artifact: 'terraform-state'
-            targetPath: '$(workingDirectory)'
-
-        - task: TerraformTask@5
-          displayName: 'Terraform Plan'
-          inputs:
-            provider: 'azurerm'
-            command: 'plan'
-            workingDirectory: '$(workingDirectory)'
-            commandOptions: '-out=$(workingDirectory)/tfplan'
-            environmentServiceNameAzureRM: '${{ parameters.backendService }}'
-
-        - task: PublishPipelineArtifact@1
-          displayName: 'Publish Terraform Plan'
-          inputs:
-            targetPath: '$(workingDirectory)/tfplan'
-            artifact: 'terraform-plan'
-
-# --------------------------
-# Stage 5: Manual Approval
-# --------------------------
-- stage: ManualApproval
-  displayName: 'Stage: Manual Approval'
-  dependsOn:
-    - InfraCost
-    - SecurityScans
-  condition: eq(variables['Build.SourceBranch'], 'refs/heads/main')
-  jobs:
-    - job: ManualValidation
-      displayName: 'Manual Approval Required'
-      pool: server
-      steps:
-        - task: ManualValidation@1
-          inputs:
-            notifyUsers: 'anmolkaushik13042000@gmail.com'
-            approvers: 'anmolkaushik13042000@gmail.com'
-            instructions: 'Please approve the changes'
-
-# --------------------------
-# Stage 6: Terraform Apply
-# --------------------------
-
-- stage: TerraformApply
-  displayName: 'Terraform: Apply (Production)'
-  dependsOn:
-    - TerraformPlan
-    - ManualApproval
-  condition: and(
-    succeeded(),
-    eq(variables['Build.SourceBranch'], 'refs/heads/main'))
-  jobs:
-  - job: TerraformApply
-    displayName: 'Terraform Apply'
-    steps:
-        - task: DownloadPipelineArtifact@2
-          displayName: 'Download Terraform Plan Artifact'
-          inputs:
-            artifact: 'terraform-plan'
-            targetPath: '$(workingDirectory)'
-        - task: TerraformTask@5
-          displayName: 'Terraform Apply'
-          inputs:
-            provider: azurerm
-            command: apply
-            workingDirectory: '$(workingDirectory)'
-            environmentServiceNameAzureRM: infra_pipeline
-            commandOptions: '-auto-approve'
+  - stage: DeployStage
+    displayName: 'Deploy Application'
+    dependsOn: PublishStage
+    jobs:
+      - job: Deployjob
+        steps:
+          - task: DownloadBuildArtifacts@1
+            inputs:
+              buildType: 'current'
+              downloadType: 'single'
+              artifactName: 'application_artifact'
+              downloadPath: '$(System.DefaultWorkingDirectory)/build'
