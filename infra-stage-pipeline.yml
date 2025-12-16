@@ -1,0 +1,280 @@
+trigger: none
+# trigger:
+#   branches:
+#     include:
+#       - main
+pool: infra_pool
+
+name: infra-jobs-pipeline
+
+# --------------------------
+# Parameters for environment
+# --------------------------
+parameters:
+  - name: environment
+    type: string
+    default: dev
+    values:
+      - dev
+      - prod
+  - name: backendService
+    type: string
+    default: infra_pipeline
+  - name: storageAccount
+    type: string
+    default: pipelinestd1
+  - name: containerName
+    type: string
+    default: tfstate
+  - name: tfStateKey
+    type: string
+    default: terraform.tfstate
+
+# --------------------------
+# Global Variables
+# --------------------------
+variables:
+- group: INFRACOST_API_KEY
+- name: workingDirectory
+  value: '$(System.DefaultWorkingDirectory)/environment/${{ parameters.environment }}'
+
+stages:
+
+# --------------------------
+# Stage 1: Terraform Init / Validate / Fmt
+# --------------------------
+- stage: TerraformInitValidateFmt
+  displayName: 'Stage: Terraform: Init | Validate | Format'
+  jobs:
+    - job: TerraformInitValidateFmt
+      displayName: 'Terraform Quality Checks'
+      steps:
+        - task: TerraformTask@5
+          displayName: 'Terraform: Init'
+          inputs:
+            provider: 'azurerm'
+            command: 'init'
+            workingDirectory: '$(workingDirectory)'
+            backendServiceArm: '${{ parameters.backendService }}'
+            backendAzureRmStorageAccountName: '${{ parameters.storageAccount }}'
+            backendAzureRmContainerName: '${{ parameters.containerName }}'
+            backendAzureRmKey: '${{ parameters.tfStateKey }}'
+
+        - task: TerraformTask@5
+          displayName: 'Terraform: Validate'
+          inputs:
+            provider: 'azurerm'
+            command: 'validate'
+            workingDirectory: '$(workingDirectory)'
+
+        - task: TerraformTask@5
+          displayName: 'Terraform: Format'
+          inputs:
+            provider: 'azurerm'
+            command: 'custom'
+            workingDirectory: '$(workingDirectory)'
+            customCommand: 'fmt'
+            environmentServiceNameAzureRM: '${{ parameters.backendService }}'
+        - task: PublishPipelineArtifact@1
+          displayName: 'Publish tfstate artifact'
+          inputs:
+            targetPath: '$(workingDirectory)'
+            artifact: 'terraform-state'
+
+# --------------------------
+# Stage 2: Security Scans
+# --------------------------
+- stage: SecurityScans
+  displayName: 'Stage: Security IaC Scanning'
+  dependsOn: TerraformInitValidateFmt
+  jobs:
+    - job: TerraformSecurity
+      displayName: 'Terraform Security Scans'
+      steps:
+        - task: tfsec@1
+          displayName: 'Security Scan: tfsec'
+          inputs:
+            version: 'v1.26.0'
+            dir: '$(workingDirectory)'
+
+        - task: PowerShell@2
+          displayName: 'Security Scan: Checkov'
+          inputs:
+            targetType: 'inline'
+            script: |
+              python -m pip install --upgrade pip
+              pip install checkov
+              checkov --version
+              checkov -d . --quiet
+              Write-Host "Checkov scan completed"
+          continueOnError: true
+
+        - task: PowerShell@2
+          displayName: 'Security Scan: TruffleHog'
+          inputs:
+            targetType: 'inline'
+            script: |
+              pip install --upgrade trufflehog
+              trufflehog --version
+              trufflehog filesystem . --no-update
+              if ($LASTEXITCODE -ne 0) {
+                  Write-Host "TruffleHog detected potential secrets"
+                  exit 0
+              }
+
+        - task: PowerShell@2
+          displayName: 'Security Scan: Download Terrascan'
+          inputs:
+            targetType: 'inline'
+            script: |
+              $version = "1.18.0"
+              $url = "https://github.com/tenable/terrascan/releases/download/v$version/terrascan_${version}_Windows_x86_64.tar.gz"
+              $archive = "$(Agent.TempDirectory)\terrascan.tar.gz"
+              $extract = "$(Agent.TempDirectory)\terrascan"
+
+              Invoke-WebRequest -Uri $url -OutFile $archive
+              tar -xzf $archive -C "$(Agent.TempDirectory)"
+              $env:PATH += ";$(Agent.TempDirectory)"
+              terrascan version
+
+        - task: PowerShell@2
+          displayName: 'Security Scan: Terrascan'
+          inputs:
+            targetType: 'inline'
+            script: |
+              $env:PATH += ";$(Agent.TempDirectory)"
+              terrascan scan -t azure -i terraform -d .
+              if ($LASTEXITCODE -ne 0) {
+                  Write-Host "Terrascan detected policy violations"
+                  exit 0
+              }
+
+
+# --------------------------
+# Stage 3: Infra Cost
+# --------------------------
+- stage: InfraCost
+  displayName: 'Stage: Terraform Infra Cost'
+  dependsOn: TerraformInitValidateFmt
+  jobs:
+    - job: InfraCost
+      displayName: 'Terraform Cost Estimation'
+      steps:
+        - task: DownloadPipelineArtifact@2
+          displayName: 'Download tfstate artifact'
+          inputs:
+            artifact: 'terraform-state'
+            targetPath: '$(workingDirectory)'
+        
+        - task: TerraformTaskV4@4
+          displayName: Terraform Plan
+          inputs:
+            provider: 'azurerm'
+            command: 'plan'
+            workingDirectory: '$(workingDirectory)'
+            commandOptions: '-out=tfplan'
+            environmentServiceNameAzureRM: 'infra_pipeline'
+
+            
+        - powershell: |
+              $env:INFRACOST_API_KEY = "$(INFRACOST_API_KEY)"
+              infracost breakdown --path "tfplan" --format table --out-file infracost.txt
+          displayName: "Generate Cost Report"
+          workingDirectory: '$(workingDirectory)'
+
+        - powershell: |
+              $source = "$(workingDirectory)/infracost.txt"
+              $destination = "$(Build.ArtifactStagingDirectory)/infracost.txt"
+              New-Item -ItemType Directory -Force -Path "$(Build.ArtifactStagingDirectory)"
+              Copy-Item $source $destination -Force
+          displayName: "Move Infracost Report to Artifact Staging Directory"
+
+        - task: PublishBuildArtifacts@1
+          displayName: "Publish Cost Report"
+          inputs:
+            PathtoPublish: '$(Build.ArtifactStagingDirectory)/infracost.txt'
+            ArtifactName: 'CostReport'
+            publishLocation: 'Container'
+
+
+# --------------------------
+# Stage 4: Terraform Plan
+# --------------------------
+- stage: TerraformPlan
+  displayName: 'Stage: Terraform Final Plan'
+  dependsOn: TerraformInitValidateFmt
+  jobs:
+    - job: TerraformPlan
+      displayName: 'Terraform: Final Plan'
+      pool: infra_pool
+      steps:
+        - task: DownloadPipelineArtifact@2
+          displayName: 'Download tfstate artifact'
+          inputs:
+            artifact: 'terraform-state'
+            targetPath: '$(workingDirectory)'
+
+        - task: TerraformTask@5
+          displayName: 'Terraform Plan'
+          inputs:
+            provider: 'azurerm'
+            command: 'plan'
+            workingDirectory: '$(workingDirectory)'
+            commandOptions: '-out=$(workingDirectory)/tfplan'
+            environmentServiceNameAzureRM: '${{ parameters.backendService }}'
+
+        - task: PublishPipelineArtifact@1
+          displayName: 'Publish Terraform Plan'
+          inputs:
+            targetPath: '$(workingDirectory)/tfplan'
+            artifact: 'terraform-plan'
+
+# --------------------------
+# Stage 5: Manual Approval
+# --------------------------
+- stage: ManualApproval
+  displayName: 'Stage: Manual Approval'
+  dependsOn:
+    - InfraCost
+    - SecurityScans
+  condition: eq(variables['Build.SourceBranch'], 'refs/heads/main')
+  jobs:
+    - job: ManualValidation
+      displayName: 'Manual Approval Required'
+      pool: server
+      steps:
+        - task: ManualValidation@1
+          inputs:
+            notifyUsers: 'anmolkaushik13042000@gmail.com'
+            approvers: 'anmolkaushik13042000@gmail.com'
+            instructions: 'Please approve the changes'
+
+# --------------------------
+# Stage 6: Terraform Apply
+# --------------------------
+
+- stage: TerraformApply
+  displayName: 'Terraform: Apply (Production)'
+  dependsOn:
+    - TerraformPlan
+    - ManualApproval
+  condition: and(
+    succeeded(),
+    eq(variables['Build.SourceBranch'], 'refs/heads/main'))
+  jobs:
+  - job: TerraformApply
+    displayName: 'Terraform Apply'
+    steps:
+        - task: DownloadPipelineArtifact@2
+          displayName: 'Download Terraform Plan Artifact'
+          inputs:
+            artifact: 'terraform-plan'
+            targetPath: '$(workingDirectory)'
+        - task: TerraformTask@5
+          displayName: 'Terraform Apply'
+          inputs:
+            provider: azurerm
+            command: apply
+            workingDirectory: '$(workingDirectory)'
+            environmentServiceNameAzureRM: infra_pipeline
+            commandOptions: '-auto-approve'
