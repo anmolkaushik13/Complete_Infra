@@ -15,7 +15,7 @@ This project bridges the gap between Infrastructure as Code (IaC) and Automated 
 ✅ Secure State Management: Configured for remote state locking via provider.tf.
 
 📂 Repository Structure
-
+```
 Root/
 ├── .github/workflows/          # CI/CD Trigger Definitions
 │   ├── dev.yml                 # Pipeline trigger for Development branch
@@ -48,6 +48,7 @@ azurerm_virtual_network
 ├── infra-stage-pipeline.yml        # Stage orchestration for Infrastructure
 └── .gitignore                      # Git ignore rules
 
+```
 🧩 Workflow Overview🔹 1. Environment Configuration (environment/)Instead of a monolithic file, this repo uses directory-based environments.environment/dev: Contains the state, variables, and provider configuration specific to the Development environment.Scalability: Easily add environment/prod or environment/staging by copying the folder structure.🔹 2. CI/CD Pipelines (.github/ & Root YAMLs)This repository uses a template-based approach to pipelines:dev.yml / main.yml: The entry points that trigger on git push.infra-*-pipelines.yml: Handles terraform init, plan, and apply logic.application-*-pipelines.yml: Handles application code build and deployment logic (decoupled from infra).⚙️ Prerequisites✅ Terraform >= 1.5✅ Azure CLI (az login)✅ GitHub Secrets configured (Client ID, Secret, Tenant ID, Subscription ID)✅ Azure Storage Account (for remote backend state)🖥️ Local Setup (Manual Deployment)To run the infrastructure locally for development purposes:Step 1: Clone RepositoryBashgit clone https://github.com/<your-username>/azure-terraform-cicd.git
 cd azure-terraform-cicd
 Step 2: Navigate to EnvironmentYou must run commands from the specific environment directory, not the root.Bashcd environment/dev
