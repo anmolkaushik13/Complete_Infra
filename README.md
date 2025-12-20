@@ -49,14 +49,19 @@ azurerm_virtual_network
 └── .gitignore                      # Git ignore rules
 
 ```
-🧩 Workflow Overview🔹 1. Environment Configuration (environment/)Instead of a monolithic file, this repo uses directory-based environments.environment/dev: Contains the state, variables, and provider configuration specific to the Development environment.Scalability: Easily add environment/prod or environment/staging by copying the folder structure.🔹 2. CI/CD Pipelines (.github/ & Root YAMLs)This repository uses a template-based approach to pipelines:dev.yml / main.yml: The entry points that trigger on git push.infra-*-pipelines.yml: Handles terraform init, plan, and apply logic.application-*-pipelines.yml: Handles application code build and deployment logic (decoupled from infra).⚙️ Prerequisites✅ Terraform >= 1.5✅ Azure CLI (az login)✅ GitHub Secrets configured (Client ID, Secret, Tenant ID, Subscription ID)✅ Azure Storage Account (for remote backend state)🖥️ Local Setup (Manual Deployment)To run the infrastructure locally for development purposes:Step 1: Clone RepositoryBashgit clone https://github.com/<your-username>/azure-terraform-cicd.git
+🧩 Workflow Overview
+🔹 1. Environment Configuration (environment/)Instead of a monolithic file, this repo uses directory-based environments.environment/dev: Contains the state, variables, and provider configuration specific to the Development environment.Scalability: Easily add environment/prod or environment/staging by copying the folder structure.
+🔹 2. CI/CD Pipelines (.github/ & Root YAMLs)This repository uses a template-based approach to pipelines:dev.yml 
+        / main.yml: The entry points that trigger on git push.infra-*-pipelines.yml: Handles terraform init, plan, and apply logic.application-*-pipelines.yml: Handles application code build and deployment logic (decoupled from infra).
+        ⚙️ Prerequisites✅ Terraform >= 1.5✅ Azure CLI (az login)✅ GitHub Secrets configured (Client ID, Secret, Tenant ID, Subscription ID)✅ Azure Storage Account (for remote backend state)🖥️ Local Setup (Manual Deployment)To run the infrastructure locally for development purposes:
+Step 1: Clone RepositoryBashgit clone https://github.com/<your-username>/azure-terraform-cicd.git 
 cd azure-terraform-cicd
 Step 2: Navigate to EnvironmentYou must run commands from the specific environment directory, not the root.Bashcd environment/dev
 Step 3: Initialize & ValidateBashterraform init
 terraform validate
 Step 4: Plan InfrastructureBashterraform plan -var-file="terraform.tfvars"
 Step 5: ApplyBashterraform apply -var-file="terraform.tfvars" -auto-approve
-☁️ CI/CD Workflow StrategyThis repository is designed for GitOps.Workflow FileTriggerActiondev.ymlPush to dev branchRuns terraform plan and apply on the Dev environment.main.ymlPush to main branchRuns terraform plan and apply on the Prod environment (usually with approval gates).Pipeline Secrets Required:ARM_CLIENT_IDARM_CLIENT_SECRETARM_SUBSCRIPTION_IDARM_TENANT_ID🔐 Security Best Practices❌ Never commit .tfvars containing real secrets.❌ Never commit .terraform.lock.hcl if you change OS platforms frequently (though recommended for consistency).✅ Use Remote Backend in provider.tf to store state securely in Azure Blob Storage.✅ Use Managed Identities where possible for VM permissions.📄 .gitignore RulesThe included .gitignore ensures the following are excluded:Plaintext# Local .terraform directories
+
 **/.terraform/*
 
 # .tfstate files
