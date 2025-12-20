@@ -126,8 +126,3 @@ crash.log
 **Anmol Sharma**  
 🔗 [LinkedIn](https://www.linkedin.com/in/anmol-sharma-7b3506246/)
 
-## 🔗 Next Steps
-        If you want next, I can:
-                ├── Document the specific logic inside the infra-job-pipelines.yml.
-                ├── Create a diagram showing how the GitHub Workflow calls the separate YAML templates.
-                ├── Add a "How to add a new Environment" guide.
